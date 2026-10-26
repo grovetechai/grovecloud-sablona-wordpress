@@ -24,6 +24,45 @@ add_filter('wp_headers', function ($h) {
 remove_action('wp_head', 'wp_generator');
 add_filter('the_generator', '__return_empty_string');
 
+// Verze jádra ani v adresách stylů a skriptů (?ver=7.1.3) — sken ji jinak
+// najde i bez meta generatoru. Verze pluginů a šablon necháváme (cache).
+$grove_bez_verze = function ($src) {
+    $v = preg_quote((string) get_bloginfo('version'), '/');
+    if (is_string($src) && $v !== '' && preg_match('/[?&]ver=' . $v . '(&|$)/', $src)) {
+        return remove_query_arg('ver', $src);
+    }
+    return $src;
+};
+add_filter('style_loader_src', $grove_bez_verze, 9999);
+add_filter('script_loader_src', $grove_bez_verze, 9999);
+
+// Zobrazované jméno = přihlašovací jméno → navenek ho neukazujeme (u
+// příspěvku, v oEmbed, ve feedu). Útočník by měl polovinu přihlášení zadarmo.
+// Správce si může jméno kdykoli změnit v profilu („Zobrazovat jméno jako").
+$grove_jmeno = function ($jmeno, $user_id = null) {
+    $u = $user_id ? get_userdata($user_id) : null;
+    if (!$u) {
+        global $authordata;
+        $u = is_object($authordata) ? $authordata : null;
+    }
+    if ($u && is_string($jmeno) && $jmeno !== '' && strcasecmp($jmeno, $u->user_login) === 0) {
+        return strpos((string) get_locale(), 'cs') === 0 || strpos((string) get_locale(), 'sk') === 0 ? 'Redakce' : 'Editorial team';
+    }
+    return $jmeno;
+};
+add_filter('the_author', function ($jmeno) use ($grove_jmeno) {
+    return $grove_jmeno($jmeno);
+});
+add_filter('get_the_author_display_name', function ($jmeno, $user_id) use ($grove_jmeno) {
+    return is_admin() ? $jmeno : $grove_jmeno($jmeno, $user_id);
+}, 10, 2);
+add_filter('oembed_response_data', function ($data, $post) use ($grove_jmeno) {
+    if (isset($data['author_name']) && $post) {
+        $data['author_name'] = $grove_jmeno($data['author_name'], (int) $post->post_author);
+    }
+    return $data;
+}, 10, 2);
+
 // Výčet uživatelských jmen pro nepřihlášené (?author=1, /wp-json/wp/v2/users).
 add_action('template_redirect', function () {
     if (!is_user_logged_in() && isset($_GET['author'])) {
